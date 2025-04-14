@@ -1,8 +1,8 @@
-/* 
+/*
 May 12, 2020 - genmce
- 
-This is for converting midi input to key stroke 
- 
+
+This is for converting midi input to key stroke
+
 ;~ -------------------------------------------------------------------------------------------------
 ;~ --------------------                   Warning - "!!!!!"                    ---------------------
 ;~ -------------------- will be a warning in the comment of a line or section  ---------------------
@@ -10,76 +10,164 @@ This is for converting midi input to key stroke
 ;~ --------------------          unless you know what you are doing.           ---------------------
 ;~ --------------------                Since I do not, I don't.                ---------------------
 ;~ -------------------------------------------------------------------------------------------------
- 
- TODO - 
+
+ TODO -
 
 make menu item for midi monitor toggle
 add input box to enter the note number for the trigger?
 Maybe not needed.
-    
+
 */
-  
+
+global knob17virtoffset := 0, knob1xoffset := 478, knob27virtoffset := 0, knob37virtoffset := 0, knob47virtoffset := 0, knoboffsetarray := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], knobxcoordarray := [478, 550, 618, 719, 1197, 1296, 1368, 1436, 929, 0, 0, 0, 0, 0, 0, 990], knobycoordarray := [473, 473, 473, 473, 473, 473, 473, 473, 244, 0, 0, 0, 0, 0, 0, 244]
+
 #Persistent
 #SingleInstance, force
 SetTitleMatchMode, 2
 SendMode Input              	; Recommended for new scripts due to its superior speed and reliability.
 SetWorkingDir %A_ScriptDir% 	; Ensures a consistent starting directory.
-; =============== 
+; ===============
   version = Midi2keypress_1.0 ; Change this title to suit you,  will generate .ini file with port selection
-; =============== 
-readini()					; load midi port from .ini file 
-gosub, MidiPortRefresh        ; used to refresh the input and output port lists - see label below 
+; ===============
+readini()					; load midi port from .ini file
+gosub, MidiPortRefresh        ; used to refresh the input and output port lists - see label below
 port_test(numports)   		; test the ports - check for valid ports?
 gosub, midiin_go              ; opens the midi input port listening routine
 gosub, midiMon           	; see below - a midi monitor gui - for learning mostly - comment this line eventually.
 
 
-/* 
-  PARSE - LAST MIDI MESSAGE RECEIVED - 
-  manipulate midi input message - 
+
+
+Convert8bitToCrossfadeOffset(x)
+{
+    return Round(((1030-894)*(x/127)), 0)   ; "Return" expects an expression.
+}
+
+Convert8bitDifferenceToKnobOffsetFromCentered(x)
+{
+    return Round(((144)*((x-63)/127)), 0)   ; "Return" expects an expression.
+}
+
+HandleKnobTurnWithData(numKnob, data2)
+{
+	futureOffset := Convert8bitDifferenceToKnobOffsetFromCentered(data2)
+		if (Abs(futureOffset-knoboffsetarray[numKnob])>=1)
+		{
+			MouseClickDrag, left, knobxcoordarray[numKnob], knobycoordarray[numKnob], knobxcoordarray[numKnob], knobycoordarray[numKnob]-(futureOffset-knoboffsetarray[numKnob])
+			knoboffsetarray[numKnob] := futureOffset
+		}
+}
+/*
+  PARSE - LAST MIDI MESSAGE RECEIVED -
+  manipulate midi input message -
   Edit the section below to process your midi data the way you want.
   couple of examples provided.
   You will need to use if else or ifequal ... etc to determine which midi data you want to change and which to pass or to block.
   These if statements can be nested (see below)
 */
-
 ;*************************************************
-;*      MIDI INPUT DETECTION 
+;*      MIDI INPUT DETECTION
 ;              PARSE FUNCTION
 ;*************************************************
 MidiMsgDetect(hInput, midiMsg, wMsg) ; !!!! Midi input section in calls this function each time a midi message is received. Then the midi message is broken up into parts for manipulation.  See http://www.midi.org/techspecs/midimessages.php (decimal values).
-/* 
+/*
   Midi messages are made up of several sections
   Statusbyte, midi channel, data1, data2 - they are all combined into one midi message
   https://www.nyu.edu/classes/bello/FMT_files/9_MIDI_code.pdf
 */
 {
-	global statusbyte, chan, note, cc, data1, data2, stb ; !!!! Make these vars global to be used in other functions
+	global statusbyte, chan, note, cc, data1, data2, stb, crossfadesliderScreenOffset, crossfadeSliderStartPos, knobTotalHeightTraversed ; !!!! Make these vars global to be used in other functions
 	; Extract Vars by extracting from midi message
+	crossfadeSliderStartPos := 894 ;
+	crossfadesliderScreenOffset := 0 ;
+	knobsTotalHeightTraversed := 150 ;
 	statusbyte  	:=  midiMsg & 0xFF          ; Extract statusbyte = what type of midi message and what midi channel
 	chan        	:= (statusbyte & 0x0f) + 1  ; WHAT MIDI CHANNEL IS THE MESSAGE ON? EXTRACT FROM STATUSBYTE
 	data1         	:= (midiMsg >> 8) & 0xFF    ; THIS IS DATA1 VALUE = NOTE NUMBER OR CC NUMBER
 	data2         	:= (midiMsg >> 16) & 0xFF   ; DATA2 VALUE IS NOTE VELEOCITY OR CC VALUE
-	pitchb        	:= (data2 << 7) | data1     ; (midiMsg >> 8) & 0x7F7F  masking to extract the pitchbends  
-	
+	pitchb        	:= (data2 << 7) | data1     ; (midiMsg >> 8) & 0x7F7F  masking to extract the pitchbends
+
 	if statusbyte between 176 and 191   ; Is message a CC
 		stb := "CC"                           ; if so then set stb to CC - only used with the midi monitor
-	
+		if (data1 = 1)
+		{
+			futureOffset := Convert8bitToCrossfadeOffset(data2)
+			currentPosition := crossfadeSliderStartPos+crossfadesliderScreenOffset
+			futurePosition := crossfadeSliderStartPos+futureOffset
+			if (Abs(futurePosition-currentPosition)>=1)
+			{
+    			MouseClickDrag, left, %currentPosition%, 476, %futurePosition%, 476, 100
+				crossfadesliderScreenOffset = %futureOffset%
+				currentPosition = %futurePosition%
+			}
+		}
+
+
+		if (data1 = 21)
+		{
+			futureOffset := Convert8bitDifferenceToKnobOffsetFromCentered(data2)
+			if (Abs(futureOffset-knob17virtoffset)>=1)
+			{
+				MouseClickDrag, left, 478, 473, 478, 473-(futureOffset-knob17virtoffset)
+				knob17virtoffset = %futureOffset%
+			}
+			HandleKnobTurnWithData(1, data2)
+		}
+
+		if (data1 = 22)
+		{
+			HandleKnobTurnWithData(2, data2)
+		}
+
+		if (data1 = 23)
+		{
+			HandleKnobTurnWithData(3, data2)
+		}
+
+		if (data1 = 24)
+		{
+			HandleKnobTurnWithData(4, data2)
+		}
+		if (data1 = 25)
+		{
+			HandleKnobTurnWithData(5, data2)
+		}
+		if (data1 = 26)
+		{
+			HandleKnobTurnWithData(6, data2)
+		}
+		if (data1 = 27)
+		{
+			HandleKnobTurnWithData(7, data2)
+		}
+		if (data1 = 28)
+		{
+			HandleKnobTurnWithData(8, data2)
+		}
+		if (data1 = 70)
+		{
+			HandleKnobTurnWithData(9, data2)
+		}
+		if (data1 = 83)
+		{
+			HandleKnobTurnWithData(16, data2)
+		}
+
 	;~ -------------------------------------------------------------------------------------------------
 	;~ ---------------           Setup midi input filters to send keypresses            ----------------
 	;~ --------------- A msgbox is currently set to activate when midi key #43 is pressed --------------
 	;~ -------------------------------------------------------------------------------------------------
-	
-	
+
+
 	if statusbyte between 144 and 159  ; Is message a Note On,  if yes do below
-	{   
+	{
 		stb := "NoteOn"               ; Set gui var !!! no edit this line
-		
+
 		;~ -----if the note is # 43 show msgbox ----------------------
 		if (data1 = 43)			; THIS is the item to edit,  put your note number here,  in place of 43
 		{
 			MsgBox, , , Note On # %data1% pushed,2  ; for demonstration - msgbox will disappear after 2s
-			;~ -----------put your keystrokes here ----- uncomment below to see what it does to notepad ---------			
+			;~ -----------put your keystrokes here ----- uncomment below to see what it does to notepad ---------
 			; WinActivate, ahk_exe notepad.exe	  	; activate program - notepad should be started first
 			; send, Midi2Keys sent to notepad,      ; If notepad is open send the keystrokes to notpad
 		}
@@ -90,16 +178,16 @@ MidiMsgDetect(hInput, midiMsg, wMsg) ; !!!! Midi input section in calls this fun
 			; try something other keystrokes
 		}
 	}
-	
+
 	if statusbyte between 128 and 143  ; Is message a Note Off?
 		stb := "NoteOff"                           ; set gui to NoteOff
 	if statusbyte between 192 and 208  ;Program Change
 		stb := "PC"
 	if statusbyte between 224 and 254  ; Is message a Pitch Bend
 		return
-	
+
 	MidiInDisplay(stb, statusbyte, chan, data1, data2) ; midi display function called when message received
-	
+
 } ; end of MidiMsgDetect funciton
 
 Return
@@ -139,7 +227,7 @@ return
 midiMon: ; midi monitor gui with listviews
 gui,3:destroy
 gui,3:default
-Gui,3:Add, ListView, x5 r11 w220 Backgroundblack cyellow Count10 vIn1,  EventType|StatB|Ch|data1|data2| 
+Gui,3:Add, ListView, x5 r11 w220 Backgroundblack cyellow Count10 vIn1,  EventType|StatB|Ch|data1|data2|
 gui,3:Show, autosize xcenter y5, MidiMonitor
 
 Return
@@ -147,8 +235,8 @@ Return
 
 MidiPortRefresh: 				; get the list of ports !!!! nothing to edit here
 
-MIlist := MidiInsList(NumPorts) 
-Loop Parse, MIlist, | 
+MIlist := MidiInsList(NumPorts)
+Loop Parse, MIlist, |
 {
 }
 TheChoice := MidiInDevice + 1
@@ -158,9 +246,9 @@ return
 
 ReadIni() ; also set up the tray Menu !!!! Nothing to edit here
 {
-	Menu, tray, add, MidiSet            ; set midi ports tray item 
+	Menu, tray, add, MidiSet            ; set midi ports tray item
 	Menu, tray, add, ResetAll           ; Delete the ini file for testing --------------------------------
-	
+
 	global MidiInDevice, version ; version var is set at the beginning.
 	IfExist, %version%.ini
 	{
@@ -180,8 +268,8 @@ ReadIni() ; also set up the tray Menu !!!! Nothing to edit here
 WriteIni()
 {
 	global MidiInDevice, version 		; global vars needed
-	
-	IfNotExist, %version%.ini 		; does .ini file exist? 
+
+	IfNotExist, %version%.ini 		; does .ini file exist?
 		FileAppend,, %version%.ini 	; make one with name of the .ahk file and the following entries.
 	IniWrite, %MidiInDevice%, %version%.ini, Settings, MidiInDevice
 }
@@ -192,13 +280,13 @@ port_test(numports) ; confirm selected ports exist - !!!!! nothing to edit here
 
 {
 	global midiInDevice, midiok ;midiOutDevice
-	
+
 	; ----- In port selection test based on numports
-	If MidiInDevice not Between 0 and %numports% 
+	If MidiInDevice not Between 0 and %numports%
 		{
 			MidiIn := 0 ; this var is just to show if there is an error - set if the ports are valid = 1, invalid = 0
 			;MsgBox, 0, , midi in port Error ; (this is left only for testing)
-			If (MidiInDevice = "")              ; if there is no midi in device 
+			If (MidiInDevice = "")              ; if there is no midi in device
 				MidiInerr = Midi In Port EMPTY. ; set this var = error message
 			;MsgBox, 0, , midi in port EMPTY
 			If (midiInDevice > %numports%)          ; if greater than the number of ports on the system.
@@ -253,7 +341,7 @@ Gui, 1: Flash
 If %MidiInPort%
 	UDPort:= MidiInPort - 1, MidiInDevice:= UDPort ; probably a much better way do this, I took this from JimF's qwmidi without out editing much.... it does work same with doneoutchange below.
 GuiControl, 1:, UDPort, %MidiIndevice%
-WriteIni()		; Write .ini file in same folder as ahk file 
+WriteIni()		; Write .ini file in same folder as ahk file
 Return
 
 Set_Done: 		; aka reload program, called from midi selection gui
@@ -280,7 +368,7 @@ IfMsgBox, Cancel
 GuiClose: 		; on x exit app
 Suspend, Permit 	; allow Exit to work Paused. I just added this yesterday 3.16.09 Can now quit when Paused.
 
-MsgBox, 4, Exit %version%, Exit %version% %ver%? ; 
+MsgBox, 4, Exit %version%, Exit %version% %ver%? ;
 IfMsgBox No
 	Return
 Else IfMsgBox Yes
@@ -342,7 +430,7 @@ OpenCloseMidiAPI()
 ; #define MM_MIM_LONGERROR 0x3C6
 
 OnMessage(0x3C1, "MidiMsgDetect")  ; calling the function MidiMsgDetect in get_midi_in.ahk
-OnMessage(0x3C2, "MidiMsgDetect")  
+OnMessage(0x3C2, "MidiMsgDetect")
 OnMessage(0x3C3, "MidiMsgDetect")
 ;OnMessage(0x3C4, "MidiMsgDetect")
 ;OnMessage(0x3C5, "MidiMsgDetect")
@@ -354,7 +442,7 @@ Return
 ;*          MIDI IN PORT HANDLING
 ;*************************************************
 
-MidiInsList(ByRef NumPorts)                                             ; should work for unicode now... 
+MidiInsList(ByRef NumPorts)                                             ; should work for unicode now...
   { ; Returns a "|"-separated list of midi output devices
 	local List, MidiInCaps, PortName, result, midisize
 	(A_IsUnicode)? offsetWordStr := 64: offsetWordStr := 32
@@ -367,7 +455,7 @@ MidiInsList(ByRef NumPorts)                                             ; should
 	Loop %NumPorts%
       {
         result := DllCall("winmm.dll\midiInGetDevCaps", "UInt",A_Index-1, "Ptr",&MidiInCaps, "UInt",midisize)
-    
+
         If (result OR ErrorLevel) {
             List .= "|-Error-"
             Continue
